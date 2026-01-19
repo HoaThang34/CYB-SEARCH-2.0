@@ -187,19 +187,21 @@ def get_statistics(db: Session, subject: str = None, province: str = None):
 # ---------------------------------------------------------
 # 4. IMPORT LOGIC
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 4. IMPORT LOGIC
+# ---------------------------------------------------------
 def import_csv(file_path: str):
+    # Ensure tables exist
     Base.metadata.create_all(bind=engine)
     session = SessionLocal()
     
     try:
-        # FULL RESET for consistency as requested
+        # FULL RESET for consistency
         session.query(Candidate).delete()
-        session.commit()
+        print(f"Importing from {file_path}...")
         
         candidates = []
         
-        # Use standard csv module instead of pandas
-        # Try utf-8-sig to handle BOM if present
         with open(file_path, mode='r', encoding='utf-8-sig') as f:
             reader = csv.reader(f)
             try:
@@ -207,10 +209,8 @@ def import_csv(file_path: str):
             except StopIteration:
                 return # Empty file
             
-            # Normalize headers
             headers = [h.strip().lower() for h in headers]
             
-            # Helper to find index
             def get_idx(possible_names):
                 for name in possible_names:
                     if name in headers:
@@ -225,11 +225,9 @@ def import_csv(file_path: str):
             idx_prize = get_idx(['giải', 'giai'])
             
             for row in reader:
-                # Safe access
                 def get_val(idx):
                     if idx != -1 and idx < len(row):
                         val = row[idx].strip()
-                        # Treat empty or 'nan' as None
                         if val and val.lower() != 'nan':
                             return val
                     return None
@@ -250,12 +248,10 @@ def import_csv(file_path: str):
                     school=get_val(idx_school),
                     subject=get_val(idx_subject),
                     class_grade=None,
-                    
                     score_listening=None,
                     score_speaking=None,
                     score_reading=None,
                     score_writing=None,
-                    
                     total_score=get_float(idx_score),
                     prize=get_val(idx_prize)
                 )
@@ -271,39 +267,69 @@ def import_csv(file_path: str):
     finally:
         session.close()
 
+def ensure_data_loaded():
+    """Check if DB is empty and try to load CSV if found."""
+    db = SessionLocal()
+    try:
+        # Check if we have any candidates
+        try:
+             # Look for at least one record
+            if db.query(Candidate).first():
+                return
+        except:
+             # Table might not exist yet
+            pass
+
+        # If we are here, we need to load data
+        csv_name = "Ket qua hsg quoc gia.csv"
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        possible_paths = [
+            os.path.join(current_dir, csv_name), # Absolute path
+            csv_name, # Relative path
+            f"/var/task/{csv_name}" # Vercel typical path
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                print(f"Found dataset at: {path}")
+                import_csv(path)
+                break
+        else:
+            print("Warning: Dataset CSV not found in any expected location.")
+            
+    except Exception as e:
+        print(f"Error checking data consistency: {e}")
+    finally:
+        db.close()
+
 # ---------------------------------------------------------
 # 5. FASTAPI APP
 # ---------------------------------------------------------
 app = FastAPI(title="HSGQG System")
 
-# Mount Static
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 @app.on_event("startup")
 async def startup_event():
     Base.metadata.create_all(bind=engine)
-    
-    # Auto-import if CSV exists
-    csv_path = "Ket qua hsg quoc gia.csv"
-    if os.path.exists(csv_path):
-        print(f"Found {csv_path}, running import...")
-        import_csv(csv_path)
+    ensure_data_loaded()
 
 @app.get("/")
 async def read_home():
-    return FileResponse('static/home.html')
+    return FileResponse(os.path.join('static', 'home.html'))
 
 @app.get("/ranking")
 async def read_ranking_page():
-    return FileResponse('static/ranking.html')
+    return FileResponse(os.path.join('static', 'ranking.html'))
 
 @app.get("/search")
 async def read_search_page():
-    return FileResponse('static/search.html')
+    return FileResponse(os.path.join('static', 'search.html'))
 
 @app.get("/stats")
 async def read_stats_page():
-    return FileResponse('static/stats.html')
+    return FileResponse(os.path.join('static', 'stats.html'))
 
 # API
 @app.post("/api/upload")
@@ -317,22 +343,27 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
 @app.get("/api/ranking")
 def api_ranking(subject: str = None, province: str = None, school: str = None, db: Session = Depends(get_db)):
+    ensure_data_loaded() # Lazy load check
     return get_ranking(db, subject, province, school)
 
 @app.get("/api/stats")
 def api_stats(subject: str = None, province: str = None, db: Session = Depends(get_db)):
+    ensure_data_loaded()
     return get_statistics(db, subject, province)
 
 @app.get("/api/search")
 def api_search(q: str, db: Session = Depends(get_db)):
+    ensure_data_loaded()
     return db.query(Candidate).filter(Candidate.sbd.contains(q)).all()
 
 @app.get("/api/subjects")
 def get_subjects(db: Session = Depends(get_db)):
+    ensure_data_loaded()
     return [r[0] for r in db.query(Candidate.subject).distinct().order_by(Candidate.subject).all() if r[0]]
 
 @app.get("/api/provinces")
 def get_provinces(db: Session = Depends(get_db)):
+    ensure_data_loaded()
     return [r[0] for r in db.query(Candidate.province).distinct().order_by(Candidate.province).all() if r[0]]
 
 if __name__ == "__main__":
