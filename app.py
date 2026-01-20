@@ -67,7 +67,28 @@ PRIZE_ORDER = {
 def get_prize_value(prize_str):
     return PRIZE_ORDER.get(prize_str, 0)
 
-def get_ranking(db: Session, subject: str = None, province: str = None, school: str = None):
+def get_ranking(db: Session, subject: str = None, province: str = None, school: str = None, 
+                page: int = 1, limit: int = 50):
+    """
+    Get ranked candidates with pagination support.
+    
+    Args:
+        db: Database session
+        subject: Filter by subject
+        province: Filter by province
+        school: Filter by school
+        page: Page number (1-indexed)
+        limit: Items per page (default 50)
+    
+    Returns:
+        dict: {
+            "data": List of ranked candidates for current page,
+            "total": Total number of results,
+            "page": Current page number,
+            "limit": Items per page,
+            "total_pages": Total number of pages
+        }
+    """
     query = db.query(Candidate)
     if subject:
         query = query.filter(Candidate.subject == subject)
@@ -112,7 +133,28 @@ def get_ranking(db: Session, subject: str = None, province: str = None, school: 
             })
             
     results_with_rank.sort(key=lambda x: x["rank"])
-    return results_with_rank
+    
+    # Pagination
+    total = len(results_with_rank)
+    total_pages = (total + limit - 1) // limit  # Ceiling division
+    
+    # Validate page number
+    if page < 1:
+        page = 1
+    elif page > total_pages and total_pages > 0:
+        page = total_pages
+    
+    # Calculate offset
+    offset = (page - 1) * limit
+    paginated_data = results_with_rank[offset:offset + limit]
+    
+    return {
+        "data": paginated_data,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
 
 def get_statistics(db: Session, subject: str = None, province: str = None):
     query = db.query(Candidate)
@@ -149,6 +191,31 @@ def get_statistics(db: Session, subject: str = None, province: str = None):
                     min_scores[c.prize] = min(min_scores[c.prize], c.total_score)
         cutoff_scores = min_scores
 
+    # Province Stats
+    province_stats = {}
+    for c in candidates:
+        if c.prize in prizes:
+            p_name = c.province if c.province else "Unknown"
+            if p_name not in province_stats:
+                province_stats[p_name] = {"total": 0, "Nhất": 0, "Nhì": 0, "Ba": 0, "K.Khích": 0}
+            province_stats[p_name][c.prize] += 1
+            province_stats[p_name]["total"] += 1
+            
+    all_provinces_list = []
+    for name, stats in province_stats.items():
+        all_provinces_list.append({
+            "name": name,
+            "count": stats["total"],
+            "details": stats
+        })
+        
+    all_provinces_list.sort(key=lambda s: (
+        s["count"], 
+        s["details"]["Nhất"], 
+        s["details"]["Nhì"], 
+        s["details"]["Ba"]
+    ), reverse=True)
+
     # School Stats
     school_stats = {}
     for c in candidates:
@@ -181,7 +248,8 @@ def get_statistics(db: Session, subject: str = None, province: str = None):
         "prizes": prizes,
         "cutoff_scores": cutoff_scores,
         "top_schools": all_schools_list[:5],
-        "all_schools": all_schools_list
+        "all_schools": all_schools_list,
+        "all_provinces": all_provinces_list
     }
 
 # ---------------------------------------------------------
@@ -342,9 +410,10 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     return {"info": f"File '{file.filename}' imported successfully"}
 
 @app.get("/api/ranking")
-def api_ranking(subject: str = None, province: str = None, school: str = None, db: Session = Depends(get_db)):
+def api_ranking(subject: str = None, province: str = None, school: str = None, 
+                page: int = 1, limit: int = 50, db: Session = Depends(get_db)):
     ensure_data_loaded() # Lazy load check
-    return get_ranking(db, subject, province, school)
+    return get_ranking(db, subject, province, school, page, limit)
 
 @app.get("/api/stats")
 def api_stats(subject: str = None, province: str = None, db: Session = Depends(get_db)):
@@ -352,9 +421,33 @@ def api_stats(subject: str = None, province: str = None, db: Session = Depends(g
     return get_statistics(db, subject, province)
 
 @app.get("/api/search")
-def api_search(q: str, db: Session = Depends(get_db)):
+def api_search(q: str, page: int = 1, limit: int = 50, db: Session = Depends(get_db)):
     ensure_data_loaded()
-    return db.query(Candidate).filter(Candidate.sbd.contains(q)).all()
+    
+    # Query all matching candidates
+    all_results = db.query(Candidate).filter(Candidate.sbd.contains(q)).all()
+    
+    # Pagination
+    total = len(all_results)
+    total_pages = (total + limit - 1) // limit
+    
+    # Validate page
+    if page < 1:
+        page = 1
+    elif page > total_pages and total_pages > 0:
+        page = total_pages
+    
+    # Slice results
+    offset = (page - 1) * limit
+    paginated_results = all_results[offset:offset + limit]
+    
+    return {
+        "data": paginated_results,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
 
 @app.get("/api/subjects")
 def get_subjects(db: Session = Depends(get_db)):

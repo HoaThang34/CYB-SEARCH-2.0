@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadStatsPage();
     } else if (path === '/search') {
         // Search page init if needed
+    } else if (path === '/') {
+        // Home page - show notification popup
+        initNotificationPopup();
     }
 
     // Custom Cursor
@@ -32,6 +35,87 @@ document.addEventListener('DOMContentLoaded', async () => {
         initCustomCursor();
     }
 });
+
+// ==========================================
+// NOTIFICATION POPUP LOGIC
+// ==========================================
+function initNotificationPopup() {
+    const popup = document.getElementById('updateNotification');
+    if (!popup) return;
+
+    const closeBtn = document.getElementById('closeNotification');
+    const dismissBtn = document.getElementById('dismissNotification');
+
+    // Show popup every time user visits (removed localStorage check)
+
+
+    // Show popup after a short delay for better UX
+    setTimeout(() => {
+        popup.classList.add('show');
+    }, 800);
+
+    // Close handlers
+    const closePopup = () => {
+        popup.classList.remove('show');
+        // Removed localStorage persistence - popup will show again on next visit
+    };
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closePopup);
+    }
+
+    if (dismissBtn) {
+        dismissBtn.addEventListener('click', closePopup);
+    }
+
+    // Close on backdrop click
+    popup.addEventListener('click', (e) => {
+        if (e.target === popup) {
+            closePopup();
+        }
+    });
+
+    // Close on ESC key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && popup.classList.contains('show')) {
+            closePopup();
+        }
+    });
+}
+
+// ==========================================
+// SCROLL ANIMATIONS
+// ==========================================
+function initScrollAnimations() {
+    const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('animate-in');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, observerOptions);
+
+    // Observe glass-panel elements
+    document.querySelectorAll('.glass-panel').forEach((el, index) => {
+        el.classList.add('scroll-animate');
+        el.style.setProperty('--delay', `${index * 0.1}s`);
+        observer.observe(el);
+    });
+}
+
+// Initialize scroll animations after DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.location.pathname !== '/') {
+        setTimeout(initScrollAnimations, 100);
+    }
+});
+
 
 function injectCandidateModal() {
     if (document.getElementById('candidate-modal')) return;
@@ -194,16 +278,16 @@ function populateSelect(id, items) {
     });
 }
 
-async function loadRanking() {
+async function loadRanking(page = 1) {
     const subjEl = document.getElementById('subject-filter');
     const provEl = document.getElementById('province-filter');
 
     const subj = subjEl ? subjEl.value : '';
     const prov = provEl ? provEl.value : '';
 
-    let url = `${API_BASE}/ranking?`;
-    if (subj) url += `subject=${encodeURIComponent(subj)}&`;
-    if (prov) url += `province=${encodeURIComponent(prov)}`;
+    let url = `${API_BASE}/ranking?page=${page}&limit=50`;
+    if (subj) url += `&subject=${encodeURIComponent(subj)}`;
+    if (prov) url += `&province=${encodeURIComponent(prov)}`;
 
     const tbody = document.getElementById('ranking-body');
     if (!tbody) return;
@@ -212,17 +296,21 @@ async function loadRanking() {
 
     try {
         const res = await fetch(url);
-        currentRankingData = await res.json(); // Store for modal (ranking)
+        const response = await res.json();
+
+        // Extract pagination metadata
+        const { data, total, page: currentPage, total_pages } = response;
+        currentRankingData = data; // Store for modal
 
         tbody.innerHTML = '';
-        if (currentRankingData.length === 0) {
+        if (data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:40px">Không tìm thấy dữ liệu phù hợp</td></tr>';
         } else {
-            currentRankingData.forEach((item, idx) => {
+            data.forEach((item, idx) => {
                 const c = item.data;
                 const tr = document.createElement('tr');
                 tr.onclick = () => openCandidateModal(idx, 'ranking');
-                tr.className = 'clickable-row'; // Add class for styling
+                tr.className = 'clickable-row';
 
                 tr.innerHTML = `
                     <td class="text-center"><span class="table-rank-badge">${item.rank}</span></td>
@@ -236,10 +324,84 @@ async function loadRanking() {
                 tbody.appendChild(tr);
             });
         }
+
+        // Render pagination controls
+        renderPagination(currentPage, total_pages, total);
+
     } catch (e) {
         console.error(e);
         tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color:red">Lỗi kết nối server</td></tr>';
     }
+}
+
+// Pagination UI Component
+function renderPagination(currentPage, totalPages, totalItems) {
+    const container = document.getElementById('pagination-controls');
+    if (!container || totalPages <= 1) {
+        if (container) container.innerHTML = '';
+        return;
+    }
+
+    let paginationHTML = '<div class="pagination">';
+
+    // Info text
+    const startItem = (currentPage - 1) * 50 + 1;
+    const endItem = Math.min(currentPage * 50, totalItems);
+    paginationHTML += `<div class="pagination-info">Hiển thị ${startItem}-${endItem} / ${totalItems}</div>`;
+
+    paginationHTML += '<div class="pagination-buttons">';
+
+    // Previous button
+    if (currentPage > 1) {
+        paginationHTML += `<button class="page-btn" onclick="loadRanking(${currentPage - 1})">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+        </button>`;
+    }
+
+    // Page numbers
+    const maxButtons = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+    let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+
+    if (endPage - startPage < maxButtons - 1) {
+        startPage = Math.max(1, endPage - maxButtons + 1);
+    }
+
+    // First page
+    if (startPage > 1) {
+        paginationHTML += `<button class="page-btn" onclick="loadRanking(1)">1</button>`;
+        if (startPage > 2) {
+            paginationHTML += '<span class="page-ellipsis">...</span>';
+        }
+    }
+
+    // Page numbers
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage ? 'active' : '';
+        paginationHTML += `<button class="page-btn ${activeClass}" onclick="loadRanking(${i})">${i}</button>`;
+    }
+
+    // Last page
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            paginationHTML += '<span class="page-ellipsis">...</span>';
+        }
+        paginationHTML += `<button class="page-btn" onclick="loadRanking(${totalPages})">${totalPages}</button>`;
+    }
+
+    // Next button
+    if (currentPage < totalPages) {
+        paginationHTML += `<button class="page-btn" onclick="loadRanking(${currentPage + 1})">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+        </button>`;
+    }
+
+    paginationHTML += '</div></div>';
+    container.innerHTML = paginationHTML;
 }
 
 // Search Logic
@@ -391,6 +553,49 @@ function renderStatsFull(stats, container) {
 
     container.innerHTML = cardOverview + cardCutoff + cardSchools;
 
+    // Full Province Ranking Table
+    if (stats.all_provinces && stats.all_provinces.length > 0) {
+        let tableRows = '';
+        stats.all_provinces.forEach((s, idx) => {
+            tableRows += `
+                <tr>
+                    <td class="text-center"><span class="table-rank-badge" style="width:24px; height:24px; font-size:0.8rem">${idx + 1}</span></td>
+                    <td style="font-weight:500">${s.name}</td>
+                    <td class="text-center"><span class="prize-1" style="font-size:0.9rem; font-weight:700">${s.details['Nhất'] || '-'}</span></td>
+                    <td class="text-center"><span class="prize-2" style="font-size:0.9rem; font-weight:700">${s.details['Nhì'] || '-'}</span></td>
+                    <td class="text-center"><span class="prize-3" style="font-size:0.9rem; font-weight:700">${s.details['Ba'] || '-'}</span></td>
+                    <td class="text-center"><span class="prize-mk" style="font-size:0.9rem; font-weight:700">${s.details['K.Khích'] || '-'}</span></td>
+                    <td class="text-center"><span style="background:var(--primary); color:white; padding:2px 8px; border-radius:12px; font-size:0.85rem; font-weight:600">${s.count}</span></td>
+                </tr>
+            `;
+        });
+
+        const fullProvinceTableHtml = `
+            <div class="glass-panel" style="grid-column: 1 / -1; margin-top: 20px; padding: 20px;">
+                <h3 style="margin-bottom: 20px; font-size: 1.25rem; font-weight: 600; color: var(--text-dark);">Bảng Xếp Hạng Đơn Vị</h3>
+                <div class="table-wrapper" style="max-height: 500px; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="text-center" width="80px">Hạng</th>
+                                <th>Đơn vị</th>
+                                <th class="text-center" width="80px">Nhất</th>
+                                <th class="text-center" width="80px">Nhì</th>
+                                <th class="text-center" width="80px">Ba</th>
+                                <th class="text-center" width="80px">KK</th>
+                                <th class="text-center" width="100px">Tổng giải</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML += fullProvinceTableHtml;
+    }
+
     // Full School Ranking Table
     if (stats.all_schools && stats.all_schools.length > 0) {
         let tableRows = '';
@@ -488,10 +693,13 @@ async function showSchool(schoolName) {
     let url = `${API_BASE}/ranking?school=${encodeURIComponent(schoolName)}`;
     try {
         const res = await fetch(url);
-        const data = await res.json();
+        const response = await res.json();
+
+        // Handle paginated response structure
+        const data = response.data || response;
 
         tbody.innerHTML = '';
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:20px">Không có dữ liệu</td></tr>';
         } else {
             data.forEach((item, idx) => {
@@ -510,7 +718,7 @@ async function showSchool(schoolName) {
         }
     } catch (e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-red-500">Lỗi kết nối</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:red; padding:20px">Lỗi kết nối server</td></tr>';
     }
 }
 
