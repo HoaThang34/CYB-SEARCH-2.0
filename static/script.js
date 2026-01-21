@@ -16,7 +16,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Always fetch filters if elements exist
     if (document.getElementById('subject-filter')) {
         await fetchFilters();
-        // No auto-update on change - user will use manual "Lọc" button
+
+        // Dynamic schools based on province selection
+        const provFilter = document.getElementById('province-filter');
+        if (provFilter) {
+            provFilter.addEventListener('change', async () => {
+                await updateSchoolFilter(provFilter.value);
+            });
+        }
     }
 
     // Page specifics
@@ -252,21 +259,43 @@ function setupSidebar() {
 
 async function fetchFilters() {
     try {
-        const [subjRes, provRes, schoolRes] = await Promise.all([
+        const [subjRes, provRes] = await Promise.all([
             fetch(`${API_BASE}/subjects`),
-            fetch(`${API_BASE}/provinces`),
-            fetch(`${API_BASE}/schools`)
+            fetch(`${API_BASE}/provinces`)
         ]);
 
         const subjects = await subjRes.json();
         const provinces = await provRes.json();
-        const schools = await schoolRes.json();
 
         populateSelect('subject-filter', subjects);
         populateSelect('province-filter', provinces);
-        populateSelect('school-filter', schools);
+
+        // Initial schools fetch
+        await updateSchoolFilter('');
     } catch (e) {
         console.error("Connection failed", e);
+    }
+}
+
+async function updateSchoolFilter(province) {
+    const schoolEl = document.getElementById('school-filter');
+    if (!schoolEl) return;
+
+    // Preserve first option (Tất cả trường)
+    const firstOpt = schoolEl.options[0];
+    schoolEl.innerHTML = '';
+    schoolEl.appendChild(firstOpt);
+
+    try {
+        let url = `${API_BASE}/schools`;
+        if (province) url += `?province=${encodeURIComponent(province)}`;
+
+        const res = await fetch(url);
+        const schools = await res.json();
+
+        populateSelect('school-filter', schools);
+    } catch (e) {
+        console.error("Failed to fetch schools", e);
     }
 }
 
@@ -349,9 +378,26 @@ async function loadRanking(page = 1) {
         // Render pagination controls
         renderPagination(currentPage, total_pages, total);
 
+        // Update student count display
+        updateStudentCount(total);
+
     } catch (e) {
         console.error(e);
         tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color:red; padding:20px 0;">Lỗi kết nối server: ${e.message}</td></tr>`;
+    }
+}
+
+function updateStudentCount(total) {
+    const display = document.getElementById('student-count-display');
+    const value = document.getElementById('student-count-value');
+
+    if (display && value) {
+        if (total > 0) {
+            value.textContent = total.toLocaleString('vi-VN');
+            display.style.display = 'block';
+        } else {
+            display.style.display = 'none';
+        }
     }
 }
 

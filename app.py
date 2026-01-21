@@ -500,9 +500,12 @@ def get_provinces(db: Session = Depends(get_db)):
     return [r[0] for r in db.query(Candidate.province).distinct().order_by(Candidate.province).all() if r[0]]
 
 @app.get("/api/schools")
-def get_schools(db: Session = Depends(get_db)):
+def get_schools(province: str = None, db: Session = Depends(get_db)):
     ensure_data_loaded()
-    return [r[0] for r in db.query(Candidate.school).distinct().order_by(Candidate.school).all() if r[0]]
+    query = db.query(Candidate.school).distinct().order_by(Candidate.school)
+    if province:
+        query = query.filter(Candidate.province == province)
+    return [r[0] for r in query.all() if r[0]]
 
 if __name__ == "__main__":
     import uvicorn
