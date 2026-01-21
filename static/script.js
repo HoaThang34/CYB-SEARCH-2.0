@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Always fetch filters if elements exist
     if (document.getElementById('subject-filter')) {
         await fetchFilters();
+        // No auto-update on change - user will use manual "Lọc" button
     }
 
     // Page specifics
@@ -251,16 +252,19 @@ function setupSidebar() {
 
 async function fetchFilters() {
     try {
-        const [subjRes, provRes] = await Promise.all([
+        const [subjRes, provRes, schoolRes] = await Promise.all([
             fetch(`${API_BASE}/subjects`),
-            fetch(`${API_BASE}/provinces`)
+            fetch(`${API_BASE}/provinces`),
+            fetch(`${API_BASE}/schools`)
         ]);
 
         const subjects = await subjRes.json();
         const provinces = await provRes.json();
+        const schools = await schoolRes.json();
 
         populateSelect('subject-filter', subjects);
         populateSelect('province-filter', provinces);
+        populateSelect('school-filter', schools);
     } catch (e) {
         console.error("Connection failed", e);
     }
@@ -281,13 +285,23 @@ function populateSelect(id, items) {
 async function loadRanking(page = 1) {
     const subjEl = document.getElementById('subject-filter');
     const provEl = document.getElementById('province-filter');
+    const schoolEl = document.getElementById('school-filter');
+    const prizeEl = document.getElementById('prize-filter');
 
     const subj = subjEl ? subjEl.value : '';
     const prov = provEl ? provEl.value : '';
+    const school = schoolEl ? schoolEl.value : '';
+    const prize = prizeEl ? prizeEl.value : '';
+
+    console.log('Filter values:', { subj, prov, school, prize });
 
     let url = `${API_BASE}/ranking?page=${page}&limit=50`;
     if (subj) url += `&subject=${encodeURIComponent(subj)}`;
     if (prov) url += `&province=${encodeURIComponent(prov)}`;
+    if (school) url += `&school=${encodeURIComponent(school)}`;
+    if (prize) url += `&prize=${encodeURIComponent(prize)}`;
+
+    console.log('Request URL:', url);
 
     const tbody = document.getElementById('ranking-body');
     if (!tbody) return;
@@ -296,14 +310,25 @@ async function loadRanking(page = 1) {
 
     try {
         const res = await fetch(url);
+
+        // Check for HTTP errors (like 500/404) that might not return JSON
+        if (!res.ok) {
+            throw new Error(`Server returned ${res.status} ${res.statusText}`);
+        }
+
         const response = await res.json();
+
+        // Check for application-level error
+        if (response.error) {
+            throw new Error(response.error);
+        }
 
         // Extract pagination metadata
         const { data, total, page: currentPage, total_pages } = response;
         currentRankingData = data; // Store for modal
 
         tbody.innerHTML = '';
-        if (data.length === 0) {
+        if (!data || data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding:40px">Không tìm thấy dữ liệu phù hợp</td></tr>';
         } else {
             data.forEach((item, idx) => {
@@ -330,7 +355,7 @@ async function loadRanking(page = 1) {
 
     } catch (e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="color:red">Lỗi kết nối server</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color:red; padding:20px 0;">Lỗi kết nối server: ${e.message}</td></tr>`;
     }
 }
 

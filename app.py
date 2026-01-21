@@ -68,7 +68,7 @@ def get_prize_value(prize_str):
     return PRIZE_ORDER.get(prize_str, 0)
 
 def get_ranking(db: Session, subject: str = None, province: str = None, school: str = None, 
-                page: int = 1, limit: int = 50):
+                prize: str = None, page: int = 1, limit: int = 50):
     """
     Get ranked candidates with pagination support.
     
@@ -77,6 +77,7 @@ def get_ranking(db: Session, subject: str = None, province: str = None, school: 
         subject: Filter by subject
         province: Filter by province
         school: Filter by school
+        prize: Filter by prize (Nhất, Nhì, Ba, K.Khích)
         page: Page number (1-indexed)
         limit: Items per page (default 50)
     
@@ -105,18 +106,34 @@ def get_ranking(db: Session, subject: str = None, province: str = None, school: 
     results_with_rank = []
     
     for subj, sub_candidates in candidates_by_subject.items():
-        # Sort
-        sub_candidates.sort(key=lambda c: (
-            c.total_score if c.total_score is not None else -1,
-            get_prize_value(c.prize)
-        ), reverse=True)
+        # Sort - Robustly handle types
+        def sort_key(c):
+            # Handle total_score
+            score = -1.0
+            if c.total_score is not None:
+                try:
+                    score = float(c.total_score)
+                except (ValueError, TypeError):
+                    score = -1.0
+            
+            # Handle prize
+            prize_val = get_prize_value(c.prize)
+            
+            return (score, prize_val)
+
+        sub_candidates.sort(key=sort_key, reverse=True)
         
         current_rank = 1
         for i, candidate in enumerate(sub_candidates):
             if i > 0:
                 prev = sub_candidates[i-1]
-                if (candidate.total_score == prev.total_score and 
-                    get_prize_value(candidate.prize) == get_prize_value(prev.prize)):
+                # Compare precisely
+                curr_score = sort_key(candidate)[0]
+                prev_score = sort_key(prev)[0]
+                curr_prize = sort_key(candidate)[1]
+                prev_prize = sort_key(prev)[1]
+                
+                if (curr_score == prev_score and curr_prize == prev_prize):
                     pass 
                 else:
                     current_rank = i + 1
@@ -125,6 +142,8 @@ def get_ranking(db: Session, subject: str = None, province: str = None, school: 
             if province and candidate.province != province:
                 continue
             if school and candidate.school != school:
+                continue
+            if prize and candidate.prize != prize:
                 continue
                 
             results_with_rank.append({
@@ -411,9 +430,30 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
 @app.get("/api/ranking")
 def api_ranking(subject: str = None, province: str = None, school: str = None, 
-                page: int = 1, limit: int = 50, db: Session = Depends(get_db)):
-    ensure_data_loaded() # Lazy load check
-    return get_ranking(db, subject, province, school, page, limit)
+                prize: str = None, page: int = 1, limit: int = 50, db: Session = Depends(get_db)):
+    try:
+        ensure_data_loaded() # Move inside try block to catch init errors
+        
+        # Sanitize inputs
+        if subject: subject = subject.strip() 
+        if province: province = province.strip()
+        if school: school = school.strip()
+        if prize: prize = prize.strip()
+        
+        return get_ranking(db, subject, province, school, prize, page, limit)
+    except Exception as e:
+        print(f"ERROR in api_ranking: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty safe response with error detail
+        return {
+            "data": [],
+            "total": 0,
+            "page": 1,
+            "limit": limit,
+            "total_pages": 0,
+            "error": str(e)
+        }
 
 @app.get("/api/stats")
 def api_stats(subject: str = None, province: str = None, db: Session = Depends(get_db)):
@@ -458,6 +498,11 @@ def get_subjects(db: Session = Depends(get_db)):
 def get_provinces(db: Session = Depends(get_db)):
     ensure_data_loaded()
     return [r[0] for r in db.query(Candidate.province).distinct().order_by(Candidate.province).all() if r[0]]
+
+@app.get("/api/schools")
+def get_schools(db: Session = Depends(get_db)):
+    ensure_data_loaded()
+    return [r[0] for r in db.query(Candidate.school).distinct().order_by(Candidate.school).all() if r[0]]
 
 if __name__ == "__main__":
     import uvicorn

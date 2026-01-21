@@ -110,8 +110,31 @@
                         </select>
                     </div>
                     <div class="control-group">
-                        <label>Tìm nhanh</label>
-                        <input type="text" placeholder="Lọc trong bảng..." onkeyup="filterTable(this.value)">
+                        <label>Trường</label>
+                        <select id="school-filter">
+                            <option value="">Tất cả trường</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>Giải</label>
+                        <select id="prize-filter">
+                            <option value="">Tất cả giải</option>
+                            <option value="Nhất">Nhất</option>
+                            <option value="Nhì">Nhì</option>
+                            <option value="Ba">Ba</option>
+                            <option value="K.Khích">Khuyến Khích</option>
+                        </select>
+                    </div>
+                    <div class="control-group" style="display:flex; align-items:flex-end;">
+                        <button onclick="loadRanking(1)" class="btn btn-primary"
+                            style="padding: 10px 24px; font-weight: 600; border-radius: 8px; cursor: pointer;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2"
+                                style="margin-right:6px; vertical-align:middle;">
+                                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                            </svg>
+                            Lọc
+                        </button>
                     </div>
                 </div>
 
@@ -141,15 +164,7 @@
     </div>
 
     <script src="/static/script.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const subj = document.getElementById('subject-filter');
-            const prov = document.getElementById('province-filter');
-
-            if (subj) subj.addEventListener('change', loadRanking);
-            if (prov) prov.addEventListener('change', loadRanking);
-        });
-    </script>
+    <!-- Event listeners moved to script.js to avoid race conditions -->
 </body>
 
 </html>
