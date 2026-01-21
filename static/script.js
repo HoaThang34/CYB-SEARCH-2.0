@@ -293,15 +293,11 @@ async function loadRanking(page = 1) {
     const school = schoolEl ? schoolEl.value : '';
     const prize = prizeEl ? prizeEl.value : '';
 
-    console.log('Filter values:', { subj, prov, school, prize });
-
     let url = `${API_BASE}/ranking?page=${page}&limit=50`;
     if (subj) url += `&subject=${encodeURIComponent(subj)}`;
     if (prov) url += `&province=${encodeURIComponent(prov)}`;
     if (school) url += `&school=${encodeURIComponent(school)}`;
     if (prize) url += `&prize=${encodeURIComponent(prize)}`;
-
-    console.log('Request URL:', url);
 
     const tbody = document.getElementById('ranking-body');
     if (!tbody) return;
